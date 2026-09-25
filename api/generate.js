@@ -14,6 +14,13 @@ async function parseBuffer(req) {
   });
 }
 
+// Active supported Groq models with fallbacks
+const CANDIDATE_MODELS = [
+  'llama-3.1-8b-instant',
+  'llama3-70b-8192',
+  'llama-3.3-70b-versatile'
+];
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -39,7 +46,7 @@ export default async function handler(req, res) {
     1. Create 10 original multiple-choice questions (MCQs) focusing on ${subject}.
     2. Write all questions, options, and explanations in ${language}.
 
-    Return strictly a raw JSON array adhering to this schema without any markdown wrapping or extra text:
+    Return strictly a valid JSON array adhering to this schema without any extra commentary or code block markers:
     [
       {
         "question": "Question text in ${language}",
@@ -50,17 +57,38 @@ export default async function handler(req, res) {
     ]
     `;
 
-    const completion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: 'llama-3.3-70b-versatile',
-      response_format: { type: 'json_object' }
-    });
+    let responseText = null;
+    let lastError = null;
 
-    const responseText = completion.choices[0]?.message?.content || '[]';
-    
-    // Parse response output
+    // Iterate through active models until one responds
+    for (const modelName of CANDIDATE_MODELS) {
+      try {
+        const completion = await groq.chat.completions.create({
+          messages: [{ role: 'user', content: prompt }],
+          model: modelName,
+          response_format: { type: 'json_object' }
+        });
+
+        responseText = completion.choices[0]?.message?.content;
+        if (responseText) break;
+      } catch (err) {
+        console.warn(`Model ${modelName} failed. Trying next model...`, err.message);
+        lastError = err;
+      }
+    }
+
+    if (!responseText) {
+      throw lastError || new Error("Failed to get response from Groq models.");
+    }
+
     let quizQuestions = JSON.parse(responseText);
-    if (quizQuestions.questions) quizQuestions = quizQuestions.questions; // Handle wrapped object if present
+    
+    // Handle nested response format if wrapper key exists
+    if (quizQuestions.questions && Array.isArray(quizQuestions.questions)) {
+      quizQuestions = quizQuestions.questions;
+    } else if (quizQuestions.data && Array.isArray(quizQuestions.data)) {
+      quizQuestions = quizQuestions.data;
+    }
 
     return res.status(200).json({ success: true, questions: quizQuestions });
 
