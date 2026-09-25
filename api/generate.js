@@ -1,4 +1,4 @@
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const pdfParse = require('pdf-parse');
 
 export const config = {
@@ -27,7 +27,11 @@ export default async function handler(req, res) {
     const pdfData = await pdfParse(buffer);
     const extractedText = pdfData.text.slice(0, 30000);
 
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      generationConfig: { responseMimeType: 'application/json' }
+    });
 
     const prompt = `
     You are an expert examiner for the subject: ${subject}.
@@ -50,13 +54,10 @@ export default async function handler(req, res) {
     ]
     `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: { responseMimeType: 'application/json' }
-    });
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+    const quizQuestions = JSON.parse(responseText);
 
-    const quizQuestions = JSON.parse(response.text);
     return res.status(200).json({ success: true, questions: quizQuestions });
 
   } catch (err) {
