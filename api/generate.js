@@ -176,7 +176,8 @@ async function handler(req, res) {
       throw createError(400, 'No PDF file uploaded.');
     }
 
-    if (pdfBuffer.slice(0, 4).toString() !== '%PDF') {
+    const pdfHeader = pdfBuffer.subarray(0, 1024).toString('latin1');
+    if (!pdfHeader.includes('%PDF-')) {
       throw createError(400, 'Invalid PDF file. Please upload a valid PDF document.');
     }
 
