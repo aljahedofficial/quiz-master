@@ -14,6 +14,13 @@ async function parseBuffer(req) {
   });
 }
 
+// Active supported Groq models with robust fallbacks
+const CANDIDATE_MODELS = [
+  'llama-3.1-8b-instant',
+  'llama-3.3-70b-versatile',
+  'llama3-70b-8192'
+];
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -29,37 +36,54 @@ export default async function handler(req, res) {
 
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-    const prompt = `
-    You are an expert examiner for: ${subject}.
-    Analyze this text:
+    const systemPrompt = `You are a strict examination system. Respond ONLY with a valid JSON array. No conversational text, no markdown formatting.`;
+    
+    const userPrompt = `
+    Subject: ${subject}
+    Language: ${language}
+    Document Text:
     ${extractedText}
 
-    Task:
-    Create 10 multiple-choice questions (MCQs) in ${language}.
-    
-    Output Format:
-    Return ONLY a single valid JSON array with 10 question objects. Do not wrap in key names like "questions" or use codeblocks.
-    
-    JSON Schema:
+    Instructions:
+    1. Generate 10 original multiple-choice questions (MCQs) in ${language}.
+    2. Output strictly a JSON array formatted like this:
     [
       {
-        "question": "Question string",
-        "options": ["Opt A", "Opt B", "Opt C", "Opt D"],
+        "question": "Question text",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
         "answerIndex": 0,
-        "explanation": "Brief explanation string"
+        "explanation": "Brief explanation"
       }
     ]
     `;
 
-    const completion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: 'llama-3.1-8b-instant',
-      temperature: 0.2
-    });
+    let responseText = null;
+    let lastError = null;
 
-    const responseText = completion.choices[0]?.message?.content || '[]';
-    
-    // Clean potential markdown quotes/code block formatting safely
+    for (const modelName of CANDIDATE_MODELS) {
+      try {
+        const completion = await groq.chat.completions.create({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          model: modelName,
+          temperature: 0.2
+        });
+
+        responseText = completion.choices[0]?.message?.content;
+        if (responseText) break;
+      } catch (err) {
+        console.warn(`Model ${modelName} failed:`, err.message);
+        lastError = err;
+      }
+    }
+
+    if (!responseText) {
+      throw lastError || new Error("Failed to generate quiz from Groq API.");
+    }
+
+    // Sanitize any accidental code-block markdown wrappers
     const jsonString = responseText.replace(/```json|```/g, '').trim();
     let quizQuestions = JSON.parse(jsonString);
 
