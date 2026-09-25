@@ -14,13 +14,6 @@ async function parseBuffer(req) {
   });
 }
 
-// Active supported Groq models with fallbacks
-const CANDIDATE_MODELS = [
-  'llama-3.1-8b-instant',
-  'llama3-70b-8192',
-  'llama-3.3-70b-versatile'
-];
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -37,57 +30,42 @@ export default async function handler(req, res) {
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
     const prompt = `
-    You are an expert examiner specializing in ${subject}.
-    Analyze the following text extracted from a PDF document:
-
+    You are an expert examiner for: ${subject}.
+    Analyze this text:
     ${extractedText}
 
-    Tasks:
-    1. Create 10 original multiple-choice questions (MCQs) focusing on ${subject}.
-    2. Write all questions, options, and explanations in ${language}.
-
-    Return strictly a valid JSON array adhering to this schema without any extra commentary or code block markers:
+    Task:
+    Create 10 multiple-choice questions (MCQs) in ${language}.
+    
+    Output Format:
+    Return ONLY a single valid JSON array with 10 question objects. Do not wrap in key names like "questions" or use codeblocks.
+    
+    JSON Schema:
     [
       {
-        "question": "Question text in ${language}",
-        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "question": "Question string",
+        "options": ["Opt A", "Opt B", "Opt C", "Opt D"],
         "answerIndex": 0,
-        "explanation": "Brief explanation in ${language}"
+        "explanation": "Brief explanation string"
       }
     ]
     `;
 
-    let responseText = null;
-    let lastError = null;
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'llama-3.1-8b-instant',
+      temperature: 0.2
+    });
 
-    // Iterate through active models until one responds
-    for (const modelName of CANDIDATE_MODELS) {
-      try {
-        const completion = await groq.chat.completions.create({
-          messages: [{ role: 'user', content: prompt }],
-          model: modelName,
-          response_format: { type: 'json_object' }
-        });
-
-        responseText = completion.choices[0]?.message?.content;
-        if (responseText) break;
-      } catch (err) {
-        console.warn(`Model ${modelName} failed. Trying next model...`, err.message);
-        lastError = err;
-      }
-    }
-
-    if (!responseText) {
-      throw lastError || new Error("Failed to get response from Groq models.");
-    }
-
-    let quizQuestions = JSON.parse(responseText);
+    const responseText = completion.choices[0]?.message?.content || '[]';
     
-    // Handle nested response format if wrapper key exists
-    if (quizQuestions.questions && Array.isArray(quizQuestions.questions)) {
-      quizQuestions = quizQuestions.questions;
-    } else if (quizQuestions.data && Array.isArray(quizQuestions.data)) {
-      quizQuestions = quizQuestions.data;
+    // Clean potential markdown quotes/code block formatting safely
+    const jsonString = responseText.replace(/```json|```/g, '').trim();
+    let quizQuestions = JSON.parse(jsonString);
+
+    if (!Array.isArray(quizQuestions)) {
+      if (quizQuestions.questions) quizQuestions = quizQuestions.questions;
+      else if (quizQuestions.data) quizQuestions = quizQuestions.data;
     }
 
     return res.status(200).json({ success: true, questions: quizQuestions });
