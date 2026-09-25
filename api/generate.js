@@ -27,12 +27,11 @@ export default async function handler(req, res) {
     const pdfData = await pdfParse(buffer);
     const extractedText = pdfData.text.slice(0, 30000);
 
-    // Initialize Google Generative AI
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     
-    // Set model to gemini-1.5-flash and configure JSON output
+    // Updated to current model: gemini-3.8-flash
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-3.8-flash',
       generationConfig: { responseMimeType: 'application/json' }
     });
 
