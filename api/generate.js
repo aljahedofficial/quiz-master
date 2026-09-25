@@ -27,14 +27,19 @@ function parseBuffer(req, maxBytes) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let totalBytes = 0;
+    let tooLarge = false;
 
     req.on('data', (chunk) => {
+      if (tooLarge) {
+        return;
+      }
+
       const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       totalBytes += chunkBuffer.length;
 
       if (totalBytes > maxBytes) {
+        tooLarge = true;
         reject(createError(413, `PDF is too large. Maximum allowed size is ${Math.floor(maxBytes / (1024 * 1024))}MB.`));
-        req.destroy();
         return;
       }
 
