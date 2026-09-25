@@ -27,14 +27,17 @@ export default async function handler(req, res) {
     const pdfData = await pdfParse(buffer);
     const extractedText = pdfData.text.slice(0, 30000);
 
+    // Initialize Google Generative AI
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    
+    // Set model to gemini-1.5-flash and configure JSON output
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash',
       generationConfig: { responseMimeType: 'application/json' }
     });
 
     const prompt = `
-    You are an expert examiner for the subject: ${subject}.
+    You are an expert examiner specializing in ${subject}.
     Analyze the following text extracted from a PDF document:
 
     ${extractedText}
@@ -43,7 +46,7 @@ export default async function handler(req, res) {
     1. Create 10 original multiple-choice questions (MCQs) focusing on ${subject}.
     2. Write all questions, options, and explanations in ${language}.
 
-    Return strictly a raw JSON array adhering to this schema:
+    Return strictly a raw JSON array adhering to this structure:
     [
       {
         "question": "Question text in ${language}",
