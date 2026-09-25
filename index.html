@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quiz Master AI</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #0f172a; padding: 20px; max-width: 800px; margin: auto; }
+    .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .form-group { margin-bottom: 15px; }
+    label { font-weight: 600; display: block; margin-bottom: 6px; font-size: 14px; }
+    select, input[type="file"] { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
+    .btn { width: 100%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 15px; }
+    .btn:disabled { background: #94a3b8; cursor: not-allowed; }
+    .opt { display: block; width: 100%; text-align: left; margin: 8px 0; padding: 10px 14px; border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; cursor: pointer; }
+    .opt:hover:not(:disabled) { background: #f1f5f9; }
+    .correct { background: #dcfce7 !important; border-color: #22c55e !important; color: #15803d !important; font-weight: bold; }
+    .wrong { background: #fee2e2 !important; border-color: #ef4444 !important; color: #b91c1c !important; }
+    .explanation { margin-top: 10px; padding: 10px; background: #f1f5f9; border-left: 4px solid #0284c7; border-radius: 4px; font-size: 13px; display: none; }
+  </style>
+</head>
+<body>
+
+  <h2>Quiz Master AI</h2>
+  <div class="card">
+    <div class="form-group">
+      <label for="pdfFile">Select PDF Book or Notes:</label>
+      <input type="file" id="pdfFile" accept="application/pdf">
+    </div>
+
+    <div class="form-group">
+      <label for="subject">Select Subject:</label>
+      <select id="subject">
+        <option value="English Language & Grammar">English</option>
+        <option value="Bangla Literature & Grammar">Bangla</option>
+        <option value="Mathematics & Quantitative Reasoning">Math</option>
+        <option value="General Knowledge & Current Affairs">General Knowledge</option>
+        <option value="Mental Ability & Logical Reasoning">Mental Ability</option>
+        <option value="General Science">Science</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="language">Output Language:</label>
+      <select id="language">
+        <option value="English">English</option>
+        <option value="Bangla">Bangla</option>
+      </select>
+    </div>
+
+    <button class="btn" id="genBtn" onclick="generateQuiz()">Generate Quiz</button>
+  </div>
+
+  <div id="status" style="font-weight: bold; margin-bottom: 15px;"></div>
+  <div id="quizContainer"></div>
+
+  <script>
+    async function generateQuiz() {
+      const fileInput = document.getElementById('pdfFile').files[0];
+      const subject = document.getElementById('subject').value;
+      const language = document.getElementById('language').value;
+      const status = document.getElementById('status');
+      const container = document.getElementById('quizContainer');
+      const btn = document.getElementById('genBtn');
+
+      if (!fileInput) return alert("Please upload a PDF document!");
+
+      btn.disabled = true;
+      status.innerText = `Processing PDF and generating ${subject} questions...`;
+      container.innerHTML = "";
+
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/pdf',
+            'x-subject': subject,
+            'x-language': language
+          },
+          body: fileInput
+        });
+
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+
+        status.innerText = "Quiz ready!";
+        renderQuestions(data.questions);
+      } catch (err) {
+        status.innerText = "Error: " + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderQuestions(questions) {
+      const container = document.getElementById('quizContainer');
+      questions.forEach((q, idx) => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `<h3>${idx + 1}. ${q.question}</h3>`;
+
+        const exp = document.createElement('div');
+        exp.className = 'explanation';
+        exp.innerText = "Explanation: " + (q.explanation || "Correct option selected.");
+
+        q.options.forEach((opt, optIdx) => {
+          const optBtn = document.createElement('button');
+          optBtn.className = 'opt';
+          optBtn.innerText = opt;
+          optBtn.onclick = () => {
+            const siblings = card.querySelectorAll('.opt');
+            siblings.forEach(b => b.disabled = true);
+            if (optIdx === q.answerIndex) {
+              optBtn.classList.add('correct');
+            } else {
+              optBtn.classList.add('wrong');
+              if (siblings[q.answerIndex]) siblings[q.answerIndex].classList.add('correct');
+            }
+            exp.style.display = 'block';
+          };
+          card.appendChild(optBtn);
+        });
+        card.appendChild(exp);
+        container.appendChild(card);
+      });
+    }
+  </script>
+</body>
+</html>
