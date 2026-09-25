@@ -8,10 +8,25 @@ export const config = {
 async function parseBuffer(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', chunk => chunks.push(chunk));
+    req.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+function sanitizeJson(raw) {
+  let text = String(raw || '').trim();
+
+  text = text
+    .replace(/```json\s*/gi, '')
+    .replace(/```\s*$/g, '')
+    .replace(/^\s*```\s*/g, '')
+    .trim();
+
+  // remove trailing commas before closing brackets/objects
+  text = text.replace(/,\s*([}\]])/g, '$1');
+
+  return text;
 }
 
 export default async function handler(req, res) {
@@ -24,8 +39,13 @@ export default async function handler(req, res) {
     const language = req.headers['x-language'] || 'English';
 
     const buffer = await parseBuffer(req);
+
+    if (!buffer || buffer.length === 0) {
+      return res.status(400).json({ success: false, error: 'No PDF file uploaded.' });
+    }
+
     const pdfData = await pdfParse(buffer);
-    const extractedText = pdfData.text.slice(0, 30000);
+    const extractedText = (pdfData.text || '').slice(0, 30000);
 
     const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -38,8 +58,7 @@ export default async function handler(req, res) {
     Task:
     Generate 10 original multiple-choice questions (MCQs) in ${language}.
 
-    CRITICAL INSTRUCTION:
-    Return ONLY a valid raw JSON array. Do not include markdown block ticks like \`\`\`json, do not output any introductory or concluding text.
+    Return ONLY a valid raw JSON array with no markdown fences, no commentary, and no extra text.
 
     Schema:
     [
@@ -52,26 +71,24 @@ export default async function handler(req, res) {
     ]
     `;
 
-    // Active production model ID for Groq
     const completion = await groq.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
-      model: 'llama-3.1-8b-instant',
+      model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
       temperature: 0.2
     });
 
     const responseText = completion.choices[0]?.message?.content || '[]';
-    
-    // Clean potential markdown ticks if present
-    const jsonString = responseText.replace(/```json|```/g, '').trim();
+    const jsonString = sanitizeJson(responseText);
+
     let quizQuestions = JSON.parse(jsonString);
 
     if (!Array.isArray(quizQuestions)) {
-      if (quizQuestions.questions) quizQuestions = quizQuestions.questions;
-      else if (quizQuestions.data) quizQuestions = quizQuestions.data;
+      if (Array.isArray(quizQuestions?.questions)) quizQuestions = quizQuestions.questions;
+      else if (Array.isArray(quizQuestions?.data)) quizQuestions = quizQuestions.data;
+      else throw new Error('Model returned a non-array payload.');
     }
 
     return res.status(200).json({ success: true, questions: quizQuestions });
-
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
