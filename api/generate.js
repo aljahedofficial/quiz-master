@@ -1,4 +1,4 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 const pdfParse = require('pdf-parse');
 
 export const config = {
@@ -14,9 +14,6 @@ async function parseBuffer(req) {
   });
 }
 
-// Fallback sequence if a model hits 503 high-demand
-const CANDIDATE_MODELS = ['gemini-3.8-flash', 'gemini-2.5-flash'];
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -30,7 +27,7 @@ export default async function handler(req, res) {
     const pdfData = await pdfParse(buffer);
     const extractedText = pdfData.text.slice(0, 30000);
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
     const prompt = `
     You are an expert examiner specializing in ${subject}.
@@ -42,7 +39,7 @@ export default async function handler(req, res) {
     1. Create 10 original multiple-choice questions (MCQs) focusing on ${subject}.
     2. Write all questions, options, and explanations in ${language}.
 
-    Return strictly a raw JSON array adhering to this structure:
+    Return strictly a raw JSON array adhering to this schema without any markdown wrapping or extra text:
     [
       {
         "question": "Question text in ${language}",
@@ -53,31 +50,18 @@ export default async function handler(req, res) {
     ]
     `;
 
-    let responseText = null;
-    let lastError = null;
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'llama-3.3-70b-versatile',
+      response_format: { type: 'json_object' }
+    });
 
-    // Loop through candidate models until one succeeds
-    for (const modelName of CANDIDATE_MODELS) {
-      try {
-        const model = genAI.getGenerativeModel({
-          model: modelName,
-          generationConfig: { responseMimeType: 'application/json' }
-        });
+    const responseText = completion.choices[0]?.message?.content || '[]';
+    
+    // Parse response output
+    let quizQuestions = JSON.parse(responseText);
+    if (quizQuestions.questions) quizQuestions = quizQuestions.questions; // Handle wrapped object if present
 
-        const result = await model.generateContent(prompt);
-        responseText = result.response.text();
-        if (responseText) break; // Request succeeded!
-      } catch (err) {
-        console.warn(`Model ${modelName} failed or overloaded. Trying fallback...`, err.message);
-        lastError = err;
-      }
-    }
-
-    if (!responseText) {
-      throw lastError || new Error("All AI models are currently saturated. Please try again shortly.");
-    }
-
-    const quizQuestions = JSON.parse(responseText);
     return res.status(200).json({ success: true, questions: quizQuestions });
 
   } catch (err) {
