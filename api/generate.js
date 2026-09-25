@@ -14,6 +14,9 @@ async function parseBuffer(req) {
   });
 }
 
+// Fallback sequence if a model hits 503 high-demand
+const CANDIDATE_MODELS = ['gemini-3.8-flash', 'gemini-2.5-flash'];
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -28,12 +31,6 @@ export default async function handler(req, res) {
     const extractedText = pdfData.text.slice(0, 30000);
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    
-    // Updated to current model: gemini-3.8-flash
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.8-flash',
-      generationConfig: { responseMimeType: 'application/json' }
-    });
 
     const prompt = `
     You are an expert examiner specializing in ${subject}.
@@ -56,10 +53,31 @@ export default async function handler(req, res) {
     ]
     `;
 
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
-    const quizQuestions = JSON.parse(responseText);
+    let responseText = null;
+    let lastError = null;
 
+    // Loop through candidate models until one succeeds
+    for (const modelName of CANDIDATE_MODELS) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: { responseMimeType: 'application/json' }
+        });
+
+        const result = await model.generateContent(prompt);
+        responseText = result.response.text();
+        if (responseText) break; // Request succeeded!
+      } catch (err) {
+        console.warn(`Model ${modelName} failed or overloaded. Trying fallback...`, err.message);
+        lastError = err;
+      }
+    }
+
+    if (!responseText) {
+      throw lastError || new Error("All AI models are currently saturated. Please try again shortly.");
+    }
+
+    const quizQuestions = JSON.parse(responseText);
     return res.status(200).json({ success: true, questions: quizQuestions });
 
   } catch (err) {
